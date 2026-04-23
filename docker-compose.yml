@@ -1,0 +1,83 @@
+name: hng14-stage2-devops
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli -h 127.0.0.1 -p 6379 ping | grep PONG
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+    cpus: "0.25"
+    mem_limit: 128m
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    networks:
+      - internal
+      - edge
+    cpus: "0.50"
+    mem_limit: 256m
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_URL: http://api:8000
+      PORT: "3000"
+      NODE_ENV: production
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - internal
+      - edge
+    cpus: "0.50"
+    mem_limit: 256m
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_RETRY_DELAY_SECONDS: "5"
+      WORKER_HEARTBEAT_FILE: /tmp/worker-heartbeat
+      WORKER_HEALTH_TTL_SECONDS: "30"
+    networks:
+      - internal
+    cpus: 0.50
+    mem_limit: 256m
+
+networks:
+  internal:
+    name: hng14_internal
+    internal: true
+  edge:
+    name: hng14_edge
